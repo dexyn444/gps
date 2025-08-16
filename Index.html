@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rastro Seguro</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://kit.fontawesome.com/9f31c9f84d.js" crossorigin="anonymous"></script>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0078d7">
+<style>
+:root{--panel-bg:rgba(255,255,255,0.95);--text-color:#000}
+@media (prefers-color-scheme: dark){:root{--panel-bg:rgba(30,30,30,0.95);--text-color:#fff}}
+body,html{margin:0;padding:0;height:100%;width:100%;font-family:"Segoe UI",Arial,sans-serif}
+#map{height:100%;width:100%}
+#controls{position:absolute;top:10px;left:10px;background:var(--panel-bg);color:var(--text-color);padding:12px;border-radius:14px;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:1000;max-width:280px;transition:all 0.3s ease}
+#controls.minimized{height:42px;overflow:hidden;padding:6px 12px}
+#controls h2{margin:0 0 10px 0;font-size:16px;display:flex;align-items:center;justify-content:space-between}
+button{display:block;margin:6px 0;padding:8px 12px;width:100%;border:none;border-radius:8px;background:#0078d7;color:#fff;cursor:pointer;font-size:14px;transition:0.2s}
+button:hover{background:#005fa3}
+select{width:100%;padding:6px;margin-bottom:10px;border-radius:6px;border:1px solid #ccc}
+.history{max-height:120px;overflow-y:auto;margin-top:8px;font-size:13px;padding:4px;border:1px solid #ddd;border-radius:8px;background:rgba(255,255,255,0.6)}
+@media (prefers-color-scheme: dark){.history{background:rgba(50,50,50,0.6)}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="controls">
+<h2>Rastro Seguro 
+<button id="togglePanel" style="width:auto;background:#444;color:#fff;padding:4px 8px;">
+<i class="fas fa-angle-up"></i></button></h2>
+<label>Modo:</label>
+<select id="mode">
+<option value="walk">🚶 A Pé</option>
+<option value="bike">🏍️ Moto</option>
+<option value="car">🚗 Carro</option>
+</select>
+<button id="start"><i class="fas fa-play"></i> Iniciar</button>
+<button id="pause"><i class="fas fa-pause"></i> Pausar</button>
+<button id="stop"><i class="fas fa-stop"></i> Encerrar</button>
+<button id="export"><i class="fas fa-file-export"></i> Exportar</button>
+<button id="installBtn" style="background:#22c55e;display:none"><i class="fas fa-download"></i> Instalar App</button>
+<p><strong>Distância:</strong> <span id="distance">0</span> m</p>
+<p><strong>Velocidade:</strong> <span id="speed">0</span> km/h</p>
+<h3 style="margin-top:10px;">Histórico</h3>
+<div class="history" id="history">Nenhuma viagem salva.</div>
+</div>
+
+<script>
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+e.preventDefault();
+deferredPrompt=e;
+document.getElementById("installBtn").style.display="block";
+});
+document.getElementById("installBtn").addEventListener('click',async()=>{
+if(!deferredPrompt) return;
+deferredPrompt.prompt();
+await deferredPrompt.userChoice;
+deferredPrompt=null;
+document.getElementById("installBtn").style.display="none";
+});
+
+// Mapa
+const map=L.map('map').setView([0,0],15);
+const lightTiles=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+const darkTiles=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png');
+(prefersDark?darkTiles:lightTiles).addTo(map);
+
+let tracking=false,paused=false,path=[],watchId=null;
+let polyline=L.polyline([],{color:'deepskyblue'}).addTo(map);
+
+function haversine(lat1,lon1,lat2,lon2){const R=6371000,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180;
+const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
+
+function updateHistory(){
+const historyDiv=document.getElementById("history");
+const data=JSON.parse(localStorage.getItem("trips")||"[]");
+if(data.length===0){historyDiv.innerHTML="Nenhuma viagem salva.";}
+else{historyDiv.innerHTML=data.map((t,i)=>`<div><b>${i+1}.</b> ${t.mode} - ${(t.distance/1000).toFixed(2)} km</div>`).join("");}
+}
+
+document.getElementById("start").onclick=()=>{
+if(tracking)return;
+tracking=true;paused=false;path=[];polyline.setLatLngs([]);
+watchId=navigator.geolocation.watchPosition(pos=>{
+if(!tracking||paused)return;
+const {latitude,longitude,speed}=pos.coords;
+path.push([latitude,longitude]);
+polyline.addLatLng([latitude,longitude]);
+map.setView([latitude,longitude],16);
+if(path.length>1){
+let dist=0;
+for(let i=1;i<path.length;i++){dist+=haversine(path[i-1][0],path[i-1][1],path[i][0],path[i][1]);}
+document.getElementById("distance").textContent=dist.toFixed(1);}
+document.getElementById("speed").textContent=speed?(speed*3.6).toFixed(1):"0";},err=>alert("Erro: "+err.message),{enableHighAccuracy:true});
+};
+
+document.getElementById("pause").onclick=()=>{paused=!paused};
+document.getElementById("stop").onclick=()=>{
+tracking=false;if(watchId) navigator.geolocation.clearWatch(watchId);watchId=null;
+if(path.length>1){
+let dist=0;for(let i=1;i<path.length;i++){dist+=haversine(path[i-1][0],path[i-1][1],path[i][0],path[i][1]);}
+const mode=document.getElementById("mode").selectedOptions[0].textContent;
+const data=JSON.parse(localStorage.getItem("trips")||"[]");
+data.push({mode,distance:dist,date:new Date().toLocaleString()});
+localStorage.setItem("trips",JSON.stringify(data));
+updateHistory();}};
+
+document.getElementById("export").onclick=()=>{
+if(path.length<2){alert("Nenhum trajeto para exportar.");return;}
+let gpx=`<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="RastroSeguro"><trk><name>Trajeto</name><trkseg>`;
+path.forEach(p=>{gpx+=`<trkpt lat="${p[0]}" lon="${p[1]}"></trkpt>`});
+gpx+=`</trkseg></trk>`;const blob=new Blob([gpx],{type:"application/gpx+xml"});
+const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="trajeto.gpx";a.click();};
+
+document.getElementById("togglePanel").onclick=()=>{
+const panel=document.getElementById("controls");
+panel.classList.toggle("minimized");
+const icon=panel.classList.contains("minimized")?"fa-angle-down":"fa-angle-up";
+document.querySelector("#togglePanel i").className="fas "+icon;};
+
+updateHistory();
+
+// Service Worker
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}
+</script>
+</body>
+</html>
