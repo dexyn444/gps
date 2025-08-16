@@ -1,15 +1,6 @@
-{
-  "name": "Rastro Seguro",
-  "short_name": "Rastro",
-  "start_url": ".",
-  "display": "standalone",
-  "background_color": "#0078d7",
-  "theme_color": "#0078d7",
-  "icons": [
-    {"src":"icon-72.png","sizes":"72x72","type":"image/png"},
-    {"src":"icon-96.png","sizes":"96x96","type":"image/png"},
-    {"src":"icon-128.png","sizes":"128x128","type":"image/png"},
-    {"src":"icon-192.png","sizes":"192x192","type":"image/png"},
-    {"src":"icon-512.png","sizes":"512x512","type":"image/png"}
-  ]
-}
+const CACHE="rastro-cache-v1";
+const ASSETS=["./","./index.html","./manifest.webmanifest"];
+self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)));});
+self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));});
+self.addEventListener("fetch",e=>{e.respondWith(caches.match(e.request).then(resp=>resp||fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));return r;})).catch(()=>resp));});
+
